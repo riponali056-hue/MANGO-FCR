@@ -218,97 +218,52 @@ async def status(
 # /NUMBERS
 # =========================================================
 
-async def numbers(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not KSI_NUMBERS_ENDPOINT:
-
-        await update.message.reply_text(
-            "⚠️ KSI Numbers endpoint "
-            "is not configured."
-        )
-
-        return
-
+async def get_2_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        result = await ksi_get(NUMBERS_ENDPOINT)
+
+        numbers = result.get("data", [])
+
+        if not numbers:
+            await update.message.reply_text(
+                "📱 No numbers available right now."
+            )
+            return
+
+        # শুধুমাত্র প্রথম 2টি number
+        numbers = numbers[:2]
+
+        text = "📱 *YOUR NUMBERS*\n"
+        text += "━━━━━━━━━━━━━━━━━━\n\n"
+
+        for i, item in enumerate(numbers, 1):
+            number = item.get("number", "Unknown")
+            range_name = item.get("range_name", "Unknown")
+
+            text += f"{i}️⃣ `{number}`\n"
+            text += f"🌍 {range_name}\n\n"
+
+        text += "━━━━━━━━━━━━━━━━━━\n"
+        text += f"📊 Showing: {len(numbers)} Numbers"
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🔄 Get 2 More Numbers",
+                    callback_data="get_2_numbers"
+                )
+            ]
+        ]
 
         await update.message.reply_text(
-            "⏳ Loading numbers..."
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-        data = await ksi_get(
-            KSI_NUMBERS_ENDPOINT
-        )
-
-        result = pretty_json(data)
-
+    except Exception as e:
         await update.message.reply_text(
-
-            "📱 KSI Numbers\n\n"
-            + result
-        )
-
-    except Exception as error:
-
-        log.exception(
-            "Numbers request failed"
-        )
-
-        await update.message.reply_text(
-
-            "❌ Numbers Error\n\n"
-            + str(error)
-        )
-
-
-# =========================================================
-# /MESSAGES
-# =========================================================
-
-async def messages(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not KSI_MESSAGES_ENDPOINT:
-
-        await update.message.reply_text(
-            "⚠️ KSI Messages endpoint "
-            "is not configured."
-        )
-
-        return
-
-    try:
-
-        await update.message.reply_text(
-            "⏳ Loading messages..."
-        )
-
-        data = await ksi_get(
-            KSI_MESSAGES_ENDPOINT
-        )
-
-        result = pretty_json(data)
-
-        await update.message.reply_text(
-
-            "📩 KSI Messages\n\n"
-            + result
-        )
-
-    except Exception as error:
-
-        log.exception(
-            "Messages request failed"
-        )
-
-        await update.message.reply_text(
-
-            "❌ Messages Error\n\n"
-            + str(error)
+            f"❌ Error\n\n{e}"
         )
 
 
