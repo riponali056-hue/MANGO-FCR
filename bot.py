@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 import aiohttp
+from aiohttp import web
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -11,157 +12,565 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# =========================================================
+# LOGGING
+# =========================================================
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
 )
+
 log = logging.getLogger("ksi-bot")
+
+
+# =========================================================
+# ENVIRONMENT VARIABLES
+# =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 KSI_API_KEY = os.getenv("KSI_API_KEY", "").strip()
 
-# Put the exact endpoint URLs from your KSI API documentation here
-KSI_NUMBERS_ENDPOINT = os.getenv("KSI_NUMBERS_ENDPOINT", "").strip()
-KSI_MESSAGES_ENDPOINT = os.getenv("KSI_MESSAGES_ENDPOINT", "").strip()
-KSI_EARNINGS_ENDPOINT = os.getenv("KSI_EARNINGS_ENDPOINT", "").strip()
+KSI_NUMBERS_ENDPOINT = os.getenv(
+    "KSI_NUMBERS_ENDPOINT", ""
+).strip()
 
-# Optional: if KSI provides an incoming-SMS webhook, use that later.
-KSI_WEBHOOK_SECRET = os.getenv("KSI_WEBHOOK_SECRET", "").strip()
+KSI_MESSAGES_ENDPOINT = os.getenv(
+    "KSI_MESSAGES_ENDPOINT", ""
+).strip()
 
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "20"))
+KSI_EARNINGS_ENDPOINT = os.getenv(
+    "KSI_EARNINGS_ENDPOINT", ""
+).strip()
 
+REQUEST_TIMEOUT = int(
+    os.getenv("REQUEST_TIMEOUT", "20")
+)
+
+# Render automatically provides PORT
+PORT = int(
+    os.getenv("PORT", "10000")
+)
+
+
+# =========================================================
+# CONFIG CHECK
+# =========================================================
 
 def require_config() -> str | None:
+
     missing = []
+
     if not BOT_TOKEN:
         missing.append("BOT_TOKEN")
+
     if not KSI_API_KEY:
         missing.append("KSI_API_KEY")
+
     if missing:
-        return "Missing environment variable(s): " + ", ".join(missing)
+        return (
+            "Missing environment variable(s): "
+            + ", ".join(missing)
+        )
+
     return None
 
 
-async def ksi_get(url: str, params: dict[str, Any] | None = None) -> Any:
+# =========================================================
+# KSI API REQUEST
+# =========================================================
+
+async def ksi_get(
+    url: str,
+    params: dict[str, Any] | None = None
+) -> Any:
+
     if not url:
-        raise RuntimeError("KSI endpoint is not configured.")
+        raise RuntimeError(
+            "KSI endpoint is not configured."
+        )
 
     headers = {
-        # If KSI documentation specifies a different auth header,
-        # change this in ONE place.
         "Authorization": f"Bearer {KSI_API_KEY}",
         "Accept": "application/json",
     }
 
-    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url, headers=headers, params=params) as r:
-            text = await r.text()
-            if r.status >= 400:
-                raise RuntimeError(f"KSI HTTP {r.status}: {text[:500]}")
+    timeout = aiohttp.ClientTimeout(
+        total=REQUEST_TIMEOUT
+    )
+
+    async with aiohttp.ClientSession(
+        timeout=timeout
+    ) as session:
+
+        async with session.get(
+            url,
+            headers=headers,
+            params=params
+        ) as response:
+
+            response_text = await response.text()
+
+            if response.status >= 400:
+
+                raise RuntimeError(
+                    f"KSI HTTP {response.status}: "
+                    f"{response_text[:500]}"
+                )
+
             try:
-                return await r.json()
+                return await response.json()
+
             except Exception:
-                return {"raw": text}
+
+                return {
+                    "raw": response_text
+                }
 
 
-def pretty_json(data: Any, max_chars: int = 3500) -> str:
+# =========================================================
+# FORMAT JSON
+# =========================================================
+
+def pretty_json(
+    data: Any,
+    max_chars: int = 3500
+) -> str:
+
     import json
-    out = json.dumps(data, ensure_ascii=False, indent=2)
-    if len(out) > max_chars:
-        out = out[:max_chars] + "\n…"
-    return out
+
+    output = json.dumps(
+        data,
+        ensure_ascii=False,
+        indent=2
+    )
+
+    if len(output) > max_chars:
+
+        output = (
+            output[:max_chars]
+            + "\n..."
+        )
+
+    return output
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# /START
+# =========================================================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     await update.message.reply_text(
+
         "🤖 KSI IPRN Bot\n\n"
-        "/numbers - assigned numbers\n"
-        "/messages - received SMS records\n"
-        "/earnings - earnings statistics\n"
-        "/status - configuration status\n\n"
-        "API key is kept on the server and is not shown to users."
+
+        "/numbers - Assigned numbers\n"
+        "/messages - Received SMS records\n"
+        "/earnings - Earnings statistics\n"
+        "/status - Bot configuration\n\n"
+
+        "🔐 API key is kept on the server."
     )
 
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# /STATUS
+# =========================================================
+
+async def status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     missing = require_config()
+
     if missing:
-        await update.message.reply_text("⚠️ " + missing)
+
+        await update.message.reply_text(
+            "⚠️ " + missing
+        )
+
         return
 
     await update.message.reply_text(
+
+        "🤖 KSI Bot Status\n\n"
+
         "✅ Bot token: configured\n"
         "✅ KSI API key: configured\n"
-        f"{'✅' if KSI_NUMBERS_ENDPOINT else '❌'} Numbers endpoint\n"
-        f"{'✅' if KSI_MESSAGES_ENDPOINT else '❌'} Messages endpoint\n"
-        f"{'✅' if KSI_EARNINGS_ENDPOINT else '❌'} Earnings endpoint"
+
+        f"{'✅' if KSI_NUMBERS_ENDPOINT else '❌'} "
+        "Numbers endpoint\n"
+
+        f"{'✅' if KSI_MESSAGES_ENDPOINT else '❌'} "
+        "Messages endpoint\n"
+
+        f"{'✅' if KSI_EARNINGS_ENDPOINT else '❌'} "
+        "Earnings endpoint"
     )
 
 
-async def numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# /NUMBERS
+# =========================================================
+
+async def numbers(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if not KSI_NUMBERS_ENDPOINT:
+
         await update.message.reply_text(
-            "⚠️ KSI_NUMBERS_ENDPOINT is not configured yet."
+            "⚠️ KSI Numbers endpoint "
+            "is not configured."
         )
+
         return
+
     try:
-        data = await ksi_get(KSI_NUMBERS_ENDPOINT)
-        await update.message.reply_text("📱 KSI Numbers\n\n" + pretty_json(data))
-    except Exception as e:
-        log.exception("numbers failed")
-        await update.message.reply_text(f"❌ Numbers error: {e}")
+
+        await update.message.reply_text(
+            "⏳ Loading numbers..."
+        )
+
+        data = await ksi_get(
+            KSI_NUMBERS_ENDPOINT
+        )
+
+        result = pretty_json(data)
+
+        await update.message.reply_text(
+
+            "📱 KSI Numbers\n\n"
+            + result
+        )
+
+    except Exception as error:
+
+        log.exception(
+            "Numbers request failed"
+        )
+
+        await update.message.reply_text(
+
+            "❌ Numbers Error\n\n"
+            + str(error)
+        )
 
 
-async def messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# /MESSAGES
+# =========================================================
+
+async def messages(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if not KSI_MESSAGES_ENDPOINT:
+
         await update.message.reply_text(
-            "⚠️ KSI_MESSAGES_ENDPOINT is not configured yet."
+            "⚠️ KSI Messages endpoint "
+            "is not configured."
         )
+
         return
+
     try:
-        data = await ksi_get(KSI_MESSAGES_ENDPOINT)
-        await update.message.reply_text("📩 KSI Messages\n\n" + pretty_json(data))
-    except Exception as e:
-        log.exception("messages failed")
-        await update.message.reply_text(f"❌ Messages error: {e}")
+
+        await update.message.reply_text(
+            "⏳ Loading messages..."
+        )
+
+        data = await ksi_get(
+            KSI_MESSAGES_ENDPOINT
+        )
+
+        result = pretty_json(data)
+
+        await update.message.reply_text(
+
+            "📩 KSI Messages\n\n"
+            + result
+        )
+
+    except Exception as error:
+
+        log.exception(
+            "Messages request failed"
+        )
+
+        await update.message.reply_text(
+
+            "❌ Messages Error\n\n"
+            + str(error)
+        )
 
 
-async def earnings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# /EARNINGS
+# =========================================================
+
+async def earnings(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     if not KSI_EARNINGS_ENDPOINT:
+
         await update.message.reply_text(
-            "⚠️ KSI_EARNINGS_ENDPOINT is not configured yet."
+            "⚠️ KSI Earnings endpoint "
+            "is not configured."
         )
+
         return
+
     try:
-        data = await ksi_get(KSI_EARNINGS_ENDPOINT)
-        await update.message.reply_text("💰 KSI Earnings\n\n" + pretty_json(data))
-    except Exception as e:
-        log.exception("earnings failed")
-        await update.message.reply_text(f"❌ Earnings error: {e}")
+
+        await update.message.reply_text(
+            "⏳ Loading earnings..."
+        )
+
+        data = await ksi_get(
+            KSI_EARNINGS_ENDPOINT
+        )
+
+        result = pretty_json(data)
+
+        await update.message.reply_text(
+
+            "💰 KSI Earnings / Statistics\n\n"
+            + result
+        )
+
+    except Exception as error:
+
+        log.exception(
+            "Earnings request failed"
+        )
+
+        await update.message.reply_text(
+
+            "❌ Earnings Error\n\n"
+            + str(error)
+        )
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    log.exception("Unhandled Telegram error", exc_info=context.error)
+# =========================================================
+# RENDER HEALTH SERVER
+# =========================================================
 
+async def health(request):
+
+    return web.json_response({
+
+        "ok": True,
+
+        "status": "online",
+
+        "service": "KSI Telegram Bot"
+
+    })
+
+
+async def run_health_server():
+
+    web_app = web.Application()
+
+    # Root URL
+    web_app.router.add_get(
+        "/",
+        health
+    )
+
+    # Health URL
+    web_app.router.add_get(
+        "/health",
+        health
+    )
+
+    runner = web.AppRunner(
+        web_app
+    )
+
+    await runner.setup()
+
+    site = web.TCPSite(
+        runner,
+        "0.0.0.0",
+        PORT
+    )
+
+    await site.start()
+
+    log.info(
+        "Health server listening on 0.0.0.0:%s",
+        PORT
+    )
+
+    return runner
+
+
+# =========================================================
+# TELEGRAM ERROR HANDLER
+# =========================================================
+
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    log.exception(
+        "Unhandled Telegram error",
+        exc_info=context.error
+    )
+
+
+# =========================================================
+# RUN TELEGRAM BOT
+# =========================================================
+
+async def run_bot():
+
+    missing = require_config()
+
+    if missing:
+
+        raise RuntimeError(
+            missing
+        )
+
+    application = (
+        Application
+        .builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+
+    # Commands
+
+    application.add_handler(
+        CommandHandler(
+            "start",
+            start
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "help",
+            start
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "status",
+            status
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "numbers",
+            numbers
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "messages",
+            messages
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "earnings",
+            earnings
+        )
+    )
+
+    application.add_error_handler(
+        error_handler
+    )
+
+    # Start Telegram application
+
+    await application.initialize()
+
+    await application.start()
+
+    await application.updater.start_polling(
+        allowed_updates=Update.ALL_TYPES
+    )
+
+    log.info(
+        "KSI Telegram Bot started successfully"
+    )
+
+    try:
+
+        # Keep the bot alive forever
+
+        await asyncio.Event().wait()
+
+    finally:
+
+        log.info(
+            "Stopping Telegram bot..."
+        )
+
+        await application.updater.stop()
+
+        await application.stop()
+
+        await application.shutdown()
+
+
+# =========================================================
+# MAIN ASYNC
+# =========================================================
+
+async def main_async():
+
+    # Start Render HTTP server
+
+    await run_health_server()
+
+    # Start Telegram bot
+
+    await run_bot()
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
-    missing = require_config()
-    if missing:
-        raise SystemExit(missing)
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", start))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("numbers", numbers))
-    app.add_handler(CommandHandler("messages", messages))
-    app.add_handler(CommandHandler("earnings", earnings))
-    app.add_error_handler(error_handler)
+    try:
 
-    log.info("KSI Telegram bot started")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+        asyncio.run(
+            main_async()
+        )
 
+    except KeyboardInterrupt:
+
+        log.info(
+            "Bot stopped manually."
+        )
+
+
+# =========================================================
+# START PROGRAM
+# =========================================================
 
 if __name__ == "__main__":
+
     main()
